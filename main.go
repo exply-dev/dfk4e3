@@ -197,9 +197,12 @@ func main() {
 	mux.HandleFunc("/auth/", handleStartAuth)
 	mux.HandleFunc("/callback", handleCallback)
 
+	// Kill any previous instance on the default port before trying to listen.
+	killExistingProcess(port)
+
 	// Find a free port: try the requested port, then increment up to 10 times.
 	var listener net.Listener
-	actualPort := port
+	actualPort = port
 	for i := 0; i < 10; i++ {
 		var err error
 		listener, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", actualPort))
