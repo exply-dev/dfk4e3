@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -192,9 +193,22 @@ func main() {
 	mux.HandleFunc("/auth/", handleStartAuth)
 	mux.HandleFunc("/callback", handleCallback)
 
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	killExistingProcess(port)
-	localURL := fmt.Sprintf("http://localhost:%d", port)
+	// Find a free port: try the requested port, then increment up to 10 times.
+	var listener net.Listener
+	actualPort := port
+	for i := 0; i < 10; i++ {
+		var err error
+		listener, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", actualPort))
+		if err == nil {
+			break
+		}
+		actualPort++
+	}
+	if listener == nil {
+		log.Fatalf("Could not find a free port (tried %d–%d)", port, actualPort)
+	}
+
+	localURL := fmt.Sprintf("http://localhost:%d", actualPort)
 
 	if isDelegateMode() {
 		provLabel := delegateProvider
@@ -209,7 +223,7 @@ func main() {
 	fmt.Printf("Backend: %s\n\n", backendURL)
 	openBrowser(localURL)
 
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.Serve(listener, mux))
 }
 
 // --- Handlers ---
