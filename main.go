@@ -193,6 +193,7 @@ func main() {
 	mux.HandleFunc("/callback", handleCallback)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	killExistingProcess(port)
 	localURL := fmt.Sprintf("http://localhost:%d", port)
 
 	if isDelegateMode() {
@@ -476,6 +477,34 @@ func renderResult(w http.ResponseWriter, success bool, title, message string) {
 a.btn{display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:.6rem 1.5rem;border-radius:8px;font-weight:500}a.btn:hover{background:#1d4ed8}</style>
 </head><body><div class="card"><div class="icon">%s</div><div class="title">%s</div><p class="msg">%s</p></div></body></html>`,
 		title, color, icon, title, message)
+}
+
+// killExistingProcess kills any process listening on the given port.
+func killExistingProcess(p int) {
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		out, err := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", p)).Output()
+		if err != nil || len(out) == 0 {
+			return
+		}
+		for _, pid := range strings.Fields(strings.TrimSpace(string(out))) {
+			exec.Command("kill", pid).Run()
+		}
+		time.Sleep(200 * time.Millisecond)
+	case "windows":
+		// Windows: find and kill process on port
+		out, err := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%d", p)).Output()
+		if err != nil || len(out) == 0 {
+			return
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(strings.TrimSpace(line))
+			if len(fields) >= 5 {
+				exec.Command("taskkill", "/F", "/PID", fields[len(fields)-1]).Run()
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 func openBrowser(u string) {
