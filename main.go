@@ -130,10 +130,10 @@ func decodeDelegateProvider(token string) string {
 	return p.Provider
 }
 
-// fetchDelegateProvider calls GET /delegate/{token} on the backend to resolve the provider
+// fetchDelegateProvider calls GET /delegate/{token}/info on the backend to resolve the provider
 // when the token payload doesn't include a prv field.
 func fetchDelegateProvider(backend, token string) string {
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(backend + "/delegate/" + token)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(backend + "/delegate/" + token + "/info")
 	if err != nil || resp.StatusCode != 200 {
 		return ""
 	}
