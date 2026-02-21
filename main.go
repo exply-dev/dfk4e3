@@ -130,6 +130,23 @@ func decodeDelegateProvider(token string) string {
 	return p.Provider
 }
 
+// fetchDelegateProvider calls GET /delegate/{token} on the backend to resolve the provider
+// when the token payload doesn't include a prv field.
+func fetchDelegateProvider(backend, token string) string {
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(backend + "/delegate/" + token)
+	if err != nil || resp.StatusCode != 200 {
+		return ""
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Provider string `json:"provider"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&info) != nil {
+		return ""
+	}
+	return info.Provider
+}
+
 func main() {
 	flag.StringVar(&backendURL, "backend", "https://ohmycode.ai", "Backend URL")
 	flag.StringVar(&jwtToken, "token", "", "Admin JWT (or OHMYCODE_JWT env)")
@@ -155,6 +172,16 @@ func main() {
 			delegateProvider = p
 			if mapped, ok := providerMapping[delegateProvider]; ok {
 				delegateProvider = mapped
+			}
+		}
+
+		// Fallback: if token has no prv, ask the backend for the provider.
+		if delegateProvider == "" {
+			if p := fetchDelegateProvider(backendURL, delegateToken); p != "" {
+				delegateProvider = p
+				if mapped, ok := providerMapping[delegateProvider]; ok {
+					delegateProvider = mapped
+				}
 			}
 		}
 	}
