@@ -102,12 +102,16 @@ var (
 	jwtToken      string
 	delegateToken string
 	port          int
+	actualPort    int // resolved port (may differ from port if port was busy)
 
 	// delegateProvider is extracted from the delegate token payload (if present).
 	delegateProvider string
 
 	pendingMu sync.Mutex
 	pending   = map[string]*pendingOAuth{}
+
+	// shutdownCh signals the server to shut down after auth completes.
+	shutdownCh = make(chan struct{}, 1)
 )
 
 func isDelegateMode() bool { return delegateToken != "" }
@@ -223,7 +227,16 @@ func main() {
 	fmt.Printf("Backend: %s\n\n", backendURL)
 	openBrowser(localURL)
 
-	log.Fatal(http.Serve(listener, mux))
+	srv := &http.Server{Handler: mux}
+	go func() {
+		<-shutdownCh
+		time.Sleep(1 * time.Second) // let the response flush
+		fmt.Println("\nAuth complete — shutting down.")
+		srv.Shutdown(context.Background())
+	}()
+	if err := srv.Serve(listener); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
 
 // --- Handlers ---
@@ -292,7 +305,7 @@ func handleStartAuth(w http.ResponseWriter, r *http.Request) {
 
 	codeVerifier := randBase64URL(32)
 	state := randHex(16)
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
+	redirectURI := fmt.Sprintf("http://localhost:%d/callback", actualPort)
 
 	pendingMu.Lock()
 	pending[state] = &pendingOAuth{
@@ -401,7 +414,8 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	renderResult(w, true, "Account Activated!", "OAuth tokens imported. Account is now active. You can close this page.")
+	renderResult(w, true, "Account Activated!", "OAuth tokens imported. Account is now active. This page will close automatically.")
+	scheduleShutdown()
 }
 
 // --- Token exchange ---
@@ -491,6 +505,14 @@ func renderResult(w http.ResponseWriter, success bool, title, message string) {
 a.btn{display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:.6rem 1.5rem;border-radius:8px;font-weight:500}a.btn:hover{background:#1d4ed8}</style>
 </head><body><div class="card"><div class="icon">%s</div><div class="title">%s</div><p class="msg">%s</p></div></body></html>`,
 		title, color, icon, title, message)
+}
+
+// scheduleShutdown signals the server to stop after a short delay (lets the response finish).
+func scheduleShutdown() {
+	select {
+	case shutdownCh <- struct{}{}:
+	default:
+	}
 }
 
 // killExistingProcess kills any process listening on the given port.
