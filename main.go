@@ -47,6 +47,7 @@ type providerConfig struct {
 	Scopes       string
 	PKCE         bool
 	ContentType  string // "json" or "form"
+	CallbackPath string // override callback path (default "/callback")
 	ExtraParams  map[string]string
 }
 
@@ -66,6 +67,7 @@ var providers = map[string]providerConfig{
 		Scopes:       "openid email profile offline_access",
 		PKCE:         true,
 		ContentType:  "form",
+		CallbackPath: "/auth/callback",
 		ExtraParams: map[string]string{
 			"id_token_add_organizations": "true",
 			"codex_cli_simplified_flow":  "true",
@@ -206,6 +208,7 @@ func main() {
 	mux.HandleFunc("/api/accounts", handleAccounts)
 	mux.HandleFunc("/auth/", handleStartAuth)
 	mux.HandleFunc("/callback", handleCallback)
+	mux.HandleFunc("/auth/callback", handleCallback) // OpenAI requires this path
 
 	// Kill any previous instance on the default port before trying to listen.
 	killExistingProcess(port)
@@ -318,7 +321,11 @@ func handleStartAuth(w http.ResponseWriter, r *http.Request) {
 
 	codeVerifier := randBase64URL(32)
 	state := randHex(16)
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", actualPort)
+	cbPath := "/callback"
+	if cfg.CallbackPath != "" {
+		cbPath = cfg.CallbackPath
+	}
+	redirectURI := fmt.Sprintf("http://localhost:%d%s", actualPort, cbPath)
 
 	pendingMu.Lock()
 	pending[state] = &pendingOAuth{
