@@ -429,7 +429,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		"expires_in":    tokens.ExpiresIn,
 	}
 	if projectID != "" {
-		importPayload["projectId"] = projectID
+		importPayload["project_id"] = projectID
 	}
 	importBody, _ := json.Marshal(importPayload)
 
