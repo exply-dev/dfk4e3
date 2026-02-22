@@ -48,6 +48,7 @@ type providerConfig struct {
 	PKCE         bool
 	ContentType  string // "json" or "form"
 	CallbackPath string // override callback path (default "/callback")
+	DefaultPort  int    // preferred callback port (0 = use global default)
 	ExtraParams  map[string]string
 }
 
@@ -68,10 +69,11 @@ var providers = map[string]providerConfig{
 		PKCE:         true,
 		ContentType:  "form",
 		CallbackPath: "/auth/callback",
+		DefaultPort:  1455, // matches Codex CLI's registered redirect_uri
 		ExtraParams: map[string]string{
 			"id_token_add_organizations": "true",
 			"codex_cli_simplified_flow":  "true",
-			"originator":                "codex_cli_rs",
+			"prompt":                     "login",
 		},
 	},
 	// Google OAuth — public "installed app" credentials (same as gemini-cli).
@@ -210,6 +212,14 @@ func main() {
 	mux.HandleFunc("/callback", handleCallback)
 	mux.HandleFunc("/auth/callback", handleCallback) // OpenAI requires this path
 
+	// In delegate mode, prefer the provider's default port (e.g. OpenAI expects 1455)
+	// unless the user explicitly overrode the port with -port.
+	if isDelegateMode() && delegateProvider != "" {
+		if cfg, ok := providers[delegateProvider]; ok && cfg.DefaultPort > 0 && port == 9325 {
+			port = cfg.DefaultPort
+		}
+	}
+
 	// Kill any previous instance on the default port before trying to listen.
 	killExistingProcess(port)
 
@@ -319,7 +329,7 @@ func handleStartAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	codeVerifier := randBase64URL(32)
+	codeVerifier := randBase64URL(96) // 96 bytes → 128 base64url chars (matches Codex CLI)
 	state := randHex(16)
 	cbPath := "/callback"
 	if cfg.CallbackPath != "" {
