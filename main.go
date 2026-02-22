@@ -71,7 +71,7 @@ var providers = map[string]providerConfig{
 		ExtraParams: map[string]string{
 			"id_token_add_organizations": "true",
 			"codex_cli_simplified_flow":  "true",
-			"prompt":                     "login",
+			"originator":                "codex_cli_rs",
 		},
 	},
 	// Google OAuth — public "installed app" credentials (same as gemini-cli).
