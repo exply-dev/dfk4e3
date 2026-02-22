@@ -409,12 +409,29 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For Gemini: fetch Google Cloud project ID via Cloud Code Assist API.
+	// OAuth tokens don't work with generativelanguage.googleapis.com — they require
+	// cloudcode-pa.googleapis.com with a project ID in the request body.
+	var projectID string
+	if p.Provider == "gemini-cli" && tokens.AccessToken != "" {
+		projectID = fetchProjectID(r.Context(), tokens.AccessToken)
+		if projectID != "" {
+			log.Printf("Fetched Google Cloud project ID: %s", projectID)
+		} else {
+			log.Printf("Warning: could not fetch Google Cloud project ID")
+		}
+	}
+
 	// Send tokens to backend
-	importBody, _ := json.Marshal(map[string]any{
+	importPayload := map[string]any{
 		"access_token":  tokens.AccessToken,
 		"refresh_token": tokens.RefreshToken,
 		"expires_in":    tokens.ExpiresIn,
-	})
+	}
+	if projectID != "" {
+		importPayload["projectId"] = projectID
+	}
+	importBody, _ := json.Marshal(importPayload)
 
 	var importURL string
 	var req *http.Request
@@ -520,6 +537,59 @@ func exchangeTokens(ctx context.Context, cfg providerConfig, code, verifier, red
 		return nil, fmt.Errorf("empty access_token: %s", body)
 	}
 	return &result, nil
+}
+
+// --- Google Cloud Code Assist ---
+
+// fetchProjectID calls the Cloud Code Assist API to get the project ID for the
+// authenticated Google user. This is required because OAuth tokens from Google
+// don't work with the standard generativelanguage.googleapis.com endpoint — they
+// require cloudcode-pa.googleapis.com which needs a project in each request body.
+func fetchProjectID(ctx context.Context, accessToken string) string {
+	body, _ := json.Marshal(map[string]any{
+		"metadata": map[string]string{
+			"ideType":    "IDE_UNSPECIFIED",
+			"platform":   "PLATFORM_UNSPECIFIED",
+			"pluginType": "GEMINI",
+		},
+	})
+
+	req, _ := http.NewRequestWithContext(ctx, "POST",
+		"https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+		bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		log.Printf("loadCodeAssist request failed: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		log.Printf("loadCodeAssist returned %d: %s", resp.StatusCode, respBody)
+		return ""
+	}
+
+	var result map[string]any
+	if json.Unmarshal(respBody, &result) != nil {
+		return ""
+	}
+
+	// Response: {"cloudaicompanionProject": "projects/123456"} or
+	//           {"cloudaicompanionProject": {"id": "projects/123456"}}
+	switch v := result["cloudaicompanionProject"].(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case map[string]any:
+		if id, ok := v["id"].(string); ok {
+			return strings.TrimSpace(id)
+		}
+	}
+
+	return ""
 }
 
 // --- Helpers ---
