@@ -88,6 +88,24 @@ var providers = map[string]providerConfig{
 		ContentType:  "form",
 		ExtraParams:  map[string]string{"access_type": "offline", "prompt": "consent"},
 	},
+	// Google Antigravity IDE OAuth — separate desktop-OAuth client_id from the
+	// legacy Gemini CLI flow, with extended scopes (cclog,
+	// experimentsandconfigs) that Google now requires to expose newer Gemini
+	// models like gemini-3.5-flash. Constants mirror CLIProxyAPI's
+	// `internal/auth/antigravity/constants.go`. Empirically, sending
+	// Antigravity-shaped headers on a Gemini-CLI bearer gets HTTP 403 from
+	// cloudcode-pa (client_id ↔ UA mismatch), so this is a fully separate
+	// OAuth flow with its own refresh_token in our provider_connections table.
+	"antigravity": {
+		ClientID:     aClientID(),
+		ClientSecret: aClientSecret(),
+		AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL:     "https://oauth2.googleapis.com/token",
+		Scopes:       "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs",
+		PKCE:         false,
+		ContentType:  "form",
+		ExtraParams:  map[string]string{"access_type": "offline", "prompt": "consent"},
+	},
 }
 
 var providerMapping = map[string]string{
@@ -101,6 +119,13 @@ func gClientID() string {
 	return "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j" + ".apps.googleusercontent.com"
 }
 func gClientSecret() string { return "GOCSPX" + "-4uHgMPm-1o7Sk-geV6Cu5clXFsxl" }
+
+// Google Antigravity public installed-app credentials, same split pattern.
+// Source: CLIProxyAPI internal/auth/antigravity/constants.go.
+func aClientID() string {
+	return "1071006060591-tmhssin2h21lcre235vtolojh4g403ep" + ".apps.googleusercontent.com"
+}
+func aClientSecret() string { return "GOCSPX" + "-K58FWR486LdLJ1mLB8sXC4z6qDAf" }
 
 type pendingOAuth struct {
 	AccountID     string
@@ -409,11 +434,12 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For Gemini: fetch Google Cloud project ID via Cloud Code Assist API.
-	// OAuth tokens don't work with generativelanguage.googleapis.com — they require
-	// cloudcode-pa.googleapis.com with a project ID in the request body.
+	// For Gemini-family OAuth (gemini-cli + antigravity): fetch Google Cloud
+	// project ID via Cloud Code Assist API. OAuth tokens don't work with
+	// generativelanguage.googleapis.com — they require cloudcode-pa.googleapis.com
+	// with a project ID in the request body.
 	var projectID string
-	if p.Provider == "gemini-cli" && tokens.AccessToken != "" {
+	if (p.Provider == "gemini-cli" || p.Provider == "antigravity") && tokens.AccessToken != "" {
 		projectID = fetchProjectID(r.Context(), tokens.AccessToken)
 		if projectID != "" {
 			log.Printf("Fetched Google Cloud project ID: %s", projectID)
@@ -709,6 +735,7 @@ var providerLabels = map[string]struct{ button, hint string }{
 	"claude-code": {"Log in with Claude", "You'll be redirected to Claude for authorization."},
 	"codex":       {"Log in with OpenAI", "You'll be redirected to OpenAI for authorization."},
 	"gemini-cli":  {"Log in with Google", "You'll be redirected to Google for authorization."},
+	"antigravity": {"Log in with Google (Antigravity)", "You'll be redirected to Google for Antigravity authorization (extended scopes for gemini-3.5-flash)."},
 }
 
 func delegateHTML() string {
